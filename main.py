@@ -64,9 +64,9 @@ def test():
   file_path = data_dir + label_data + '/' + label_prefix + label_data + label_time + label_suffix
 
   # all_data = ridl.load_csv_data(file_path, mformat_header=False).to_numpy() * 60
-  all_data = ridl.load_mat_file(file_path)['imputed_data'] * 30
+  all_data = ridl.load_mat_file(file_path)['imputed_data']
   tensor_data = torch.tensor(all_data, dtype=torch.float64).to(device)
-  agent = dynamicagent.DynamicAgent(tensor_data)
+  agent = dynamicagent.DynamicAgent(tensor_data, save_mat='result.mat')
 
   # data = ridl.load_mat_file('dataset/restored_data.mat')
   # print('data type', type(data))

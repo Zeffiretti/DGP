@@ -58,6 +58,9 @@ class Label:
     #   print(axis, ':', self.models[axis])
     # print(next(self.models[axis].parameters()).device)
     self.max_iter = max_iter
+    self.predications = None
+    self.uppers = None
+    self.lowers = None
 
     # def init_model(self, train_x, train_y, likelihood, num_outputs):
     #   return MultioutputDGPModel(train_x, train_y, likelihood, num_outputs)
@@ -175,24 +178,41 @@ class Label:
                                                               [self.test_time, self.test_task],
                                                               [self.test_time, self.test_task]))
       # print(predictions)
-
+      l_pred = None
+      l_upp = None
+      l_low = None
       # make identification on each point and each channel
-      for channel, prediction in enumerate(predictions):  # idx stands for channel
-        # print(channel, ':', prediction)  # each predication contains range of  num_outputs
-        lower, upper = prediction.confidence_region()
-        mean = prediction.mean.detach()
-        # confidence interval clamp
-        # print('range ', ':', lower, upper)
-        for i in range(self.num_output):  # i stands for point index
+      for i in range(self.num_output):  # i stands for point index
+        for channel, prediction in enumerate(predictions):  # idx stands for channel
+          # for channel, prediction in enumerate(predictions):  # idx stands for channel
+          # print(channel, ':', prediction)  # each predication contains range of  num_outputs
+          lower, upper = prediction.confidence_region()
+          mean = prediction.mean.detach()
+          # print(mean.shape)
+          # confidence interval clamp
+          # print('range ', ':', lower, upper)
+          # for i in range(self.num_output):  # i stands for point index
           if upper[i] - lower[i] < 2 * self.err_bound:
             upper[i] = mean[i] + self.err_bound
             lower[i] = mean[i] - self.err_bound
+          # print('upper type:', type(upper))
+          # l_pred=torch.cat((l_pred))
+          # pred_i = torch.tensor([mean[i]])
+          l_pred = torch.tensor([[mean[i]]]).to(self.device) if l_pred is None \
+            else torch.cat((l_pred, torch.tensor([[mean[i]]]).to(self.device)), dim=1)
+          l_low = lower[i].view(1, -1) if l_low is None else torch.cat((l_low, lower[i].view(1, -1)), dim=1)
+          l_upp = upper[i].view(1, -1) if l_upp is None else torch.cat((l_upp, upper[i].view(1, -1)), dim=1)
           for j in range(num_test):
             if lower[i] < test_datas[channel, j] < upper[i]:
               # print(lower[i], test_data[j], upper[i])
               labels[channel, i, j] = 1
     labels_and = torch.logical_and(torch.logical_and(labels[0, :, :], labels[1, :, :]), labels[2, :, :])
     result_matrix = labels_and.double()
+    # wrap predications
+    # [lower1 mean1 upper1,...]
+    self.predications = l_pred if self.predications is None else torch.cat((self.predications, l_pred), dim=0)
+    self.lowers = l_low if self.lowers is None else torch.cat((self.lowers, l_low), dim=0)
+    self.uppers = l_upp if self.uppers is None else torch.cat((self.uppers, l_upp), dim=0)
     # print('result label is\n', labels)
     # labels_and should be permutation matrix
     # print('result rank is', torch.linalg.matrix_rank(result_matrix))
@@ -235,4 +255,7 @@ class Label:
     # for index in lost_points[0]:
     #   print(index, test_datas[:, index])
     # return labeled_data.view(1, -1)
-    return result_matrix  # this matrix should be handled outside the class
+    return result_matrix, self.predications[-1, :]  # this matrix should be handled outside the class
+
+  def get_predications(self):
+    return self.predications
