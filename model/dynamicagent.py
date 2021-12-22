@@ -53,11 +53,6 @@ class DynamicAgent:
     # print('after normalize: \n', self.all_data[:10, :4])
     # finished: 4 labelers are to be created
     self.g_number = [0, 4 * 3, 7 * 3, 11 * 3, 14 * 3]
-    self.split_data(self.all_data[self.tail_index:self.header_index, 1:])  # rearrange all data into four groups
-    labels_master = []
-    for g in self.groups:
-      labels_master.append(Label(self.all_data[self.tail_index:self.header_index, 0], g, self.device))
-    self.masters = labels_master
 
     self.lost_start_idx = torch.ones((14, 1)) * -1
     self.lost_end_idx = torch.ones((14, 1)) * -1
@@ -66,14 +61,25 @@ class DynamicAgent:
     end_time = timeit.default_timer()
     print("consume time:", (end_time - start_time) / 60, 'min')
 
+  def reset_model(self):
+    self.split_data(self.all_data[self.tail_index:self.header_index, 1:])  # rearrange all data into four groups
+    labels_master = []
+    for g in self.groups:
+      labels_master.append(Label(self.all_data[self.tail_index:self.header_index, 0], g, self.device))
+    self.masters = labels_master
+
   def run(self):
     # todo: running process
+    self.reset_model()
     self.train_model()
     self.predict()
     print('round 1 finished!')
     # self.fig, self.ax = plt.subplots()
-    while self.tail_index < 20000:
+    while self.tail_index < 30000:
       self.update_data()
+      if self.tail_index % 2000 == 0:
+        self.iter = 150
+        self.reset_model()
       if self.retrain:
         self.train_model(max_iter=100)
         self.retrain = False
@@ -198,7 +204,7 @@ class DynamicAgent:
       # print('before,', self.test_pos)
       # self.test_pos = self.handled_data.view(1, -1)
       # print('after,', self.test_pos)
-      self.all_data[self.header_index, 1:] = self.handled_data.detach().view(-1, 1)
+      self.all_data[self.header_index, 1:] = self.handled_data.detach().view(1, -1)
       # print('after set,', self.all_data[self.header_index, 1:])
       for idx in self.interpolation_idxes:
         self.backward_interpolation(idx)
@@ -308,7 +314,7 @@ class DynamicAgent:
         # warnings.warn("reset loose fit to 1 at {0}".format(self.header_index))
       print('\033[43mDistance is', distance, 'and loose fit is', self.loose_fit, '\033[0m')
       pred_distance = torch.cdist(self.handled_data[row, :].view(1, -1), self.predication_data[row, :].view(1, -1))
-      print('\033[43mPred_distance is', pred_distance, '\033[0m')
+      print('\033[41mPred_distance is', pred_distance, '\033[0m')
       self.iter = 1 if self.iter == 1 and (torch.isnan(pred_distance) or pred_distance < 0.8) else 30
 
   def backward_interpolation(self, index):

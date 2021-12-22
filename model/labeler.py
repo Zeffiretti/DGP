@@ -74,6 +74,17 @@ class Label:
       update_train_y = self.wrap_data(train_data, flatten=True)
       for yi, model in zip(update_train_y, self.waist_models.models):
         model.set_train_data(update_train_x, yi)
+        model.prediction_strategy = None
+
+  def get_fantasy_model(self, train_time, train_data=None):
+    update_train_x = self.wrap_time(train_time, self.num_output)
+    if train_data is None:
+      for model in self.waist_models.models:
+        model.set_train_data(update_train_x)
+    else:
+      update_train_y = self.wrap_data(train_data, flatten=True)
+      for yi, model in zip(update_train_y, self.waist_models.models):
+        model.set_train_data(update_train_x, yi)
 
   def wrap_time(self, single_time, num_output):
     """

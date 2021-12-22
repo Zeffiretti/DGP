@@ -57,7 +57,7 @@ def test():
   label_data = '1028'
   label_time = '-0834pm'
   # label_suffix = '-short.csv'
-  label_suffix = '-restored.mat'
+  label_suffix = '-restored-matlab.mat'
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   # print('device is', device)
 
