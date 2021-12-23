@@ -26,15 +26,15 @@ class DynamicAgent:
   This class is to combine the results from 4 different Labelers.
   """
 
-  def __init__(self, all_data: type(torch.tensor([])), gaussian_window=120, save_mat=None, normalize=False):
+  def __init__(self, all_data: type(torch.tensor([])), gaussian_window=120, save_mat=None, normalize=False, start_idx=23000):
     # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
     self.retrain = False
-    self.tail_index = 0
+    self.tail_index = start_idx
     self.gaussian_window = gaussian_window
     self.header_index = self.tail_index + self.gaussian_window
     self.checks = []
     self.save_mat = save_mat
-    self.loose_fit = 2
+    self.loose_fit = 2 * torch.ones((14, 1))
     self.exp = 1.0 + 1e-3
     self.iter = 1
     # self.all_data = torch.nan_to_num(all_data, nan=1000)
@@ -110,8 +110,12 @@ class DynamicAgent:
 
   def train_model(self, max_iter=150):
     # training phase
+    model = 0
     for master in self.masters:
       master.optimize(max_iter=max_iter)
+      if max_iter > 5:
+        print(f'\033[44m\033[1;30mSub-model {model} trained.\033[0m')
+        model += 1
 
   def predict(self):
     # self.tail_index += 1
@@ -183,10 +187,10 @@ class DynamicAgent:
     :return:
     """
     # the not-permuted matrix are to be handled
+    self.handled_data = self.test_pos.detach().view(14, 3)
+    self.interpolation_idxes = []
     if not torch.all((self.permutation.matmul(self.permutation.T)).eq(torch.eye(14).to(self.device))):
-      self.interpolation_idxes = []
       print('before fitting,', self.test_pos)
-      self.handled_data = self.test_pos.detach().view(14, 3)
       self.predication_data = self.pred.detach().view(14, 3)
       self.last_data = self.all_data[self.header_index - 1, 1:].detach().view(14, 3)
       assert not torch.isnan(torch.sum(self.predication_data)), 'predication contains nan number at {0}'.format(self.header_index)
@@ -204,12 +208,14 @@ class DynamicAgent:
       # print('before,', self.test_pos)
       # self.test_pos = self.handled_data.view(1, -1)
       # print('after,', self.test_pos)
-      self.all_data[self.header_index, 1:] = self.handled_data.detach().view(1, -1)
-      # print('after set,', self.all_data[self.header_index, 1:])
-      for idx in self.interpolation_idxes:
-        self.backward_interpolation(idx)
     else:
       self.iter = 1
+    # print('handled data is', self.handled_data)
+    assert not torch.isnan(torch.sum(self.handled_data)), 'handled_data contains nan number at {0}'.format(self.header_index)
+    self.all_data[self.header_index, 1:] = self.handled_data.detach().view(1, -1)
+    # print('after set,', self.all_data[self.header_index, 1:])
+    for idx in self.interpolation_idxes:
+      self.backward_interpolation(idx)
 
   def fit_conflict_labels(self):
     """
@@ -280,8 +286,8 @@ class DynamicAgent:
     assert conflict_labels.shape[0] == 0, "conflict still exists after step 1!"
     lost_points = torch.where(col_sum == 0)[0]  # 🙂
     lost_labels = torch.where(row_sum == 0)[0]  # 0th of the tuple contains one tensor
-    if not lost_labels.shape[0] == lost_points.shape[0]:
-      print(self.permutation)
+    # if not lost_labels.shape[0] == lost_points.shape[0]:
+    #   print(self.permutation)
     assert lost_labels.shape[0] == lost_points.shape[0], 'number of lost labels and points are not equal, ' \
                                                          'please handle it.'
     for idx, lost_label_idx in enumerate(lost_labels):
@@ -289,31 +295,31 @@ class DynamicAgent:
       row = lost_label_idx
       col = lost_points[idx]
       self.permutation[row, col] = 1
-      print('col={0},row={1}'.format(row, col))
-      print('last data is', self.last_data[row, :])
-      print('predication is', self.predication_data[row, :])
-      print('and data is ', self.handled_data[row, :])
-      print('nan check is', torch.isnan(self.handled_data[row, :]))
-      distance = torch.cdist(self.handled_data[row, :].view(1, -1), self.last_data[row, :].view(1, -1))
+      print('row={0},col={1}'.format(row, col))
+      print('last data is', self.last_data[col, :])
+      print('predication is', self.predication_data[col, :])
+      print('and data is ', self.handled_data[col, :])
+      print('nan check is', torch.isnan(self.handled_data[col, :]))
+      distance = torch.cdist(self.handled_data[col, :].view(1, -1), self.last_data[col, :].view(1, -1))
       # todo: replace fit param dilatometric with posture check
-      if torch.sum(torch.isnan(self.handled_data[row, :]) == True) == 3 \
-        or distance > self.loose_fit:
+      if torch.sum(torch.isnan(self.handled_data[col, :]) == True) == 3 \
+        or distance > self.loose_fit[col, 0]:
         # if the actual observed data is NaN or too large on cdist, replace it with predications
         # print('good, fit it!😋')
-        self.handled_data[row, :] = self.predication_data[row, :]
-        self.loose_fit *= self.exp
+        self.handled_data[col, :] = self.predication_data[col, :]
+        self.loose_fit[col, 0] *= self.exp
         # warnings.warn("replace raw data with predication at {0}".format(self.header_index))
-        if self.lost_start_idx[row] == -1:
-          self.lost_start_idx[row] = self.header_index
+        if self.lost_start_idx[col] == -1:
+          self.lost_start_idx[col] = self.header_index
       else:
         # catch the lost value
-        if self.lost_start_idx[row] > 0:
-          self.lost_end_idx[row] = self.header_index
-          self.interpolation_idxes.append(row)
-        self.loose_fit = 2
+        if self.lost_start_idx[col] > 0:
+          self.lost_end_idx[col] = self.header_index
+          self.interpolation_idxes.append(col)
+        self.loose_fit[col, 0] = 2
         # warnings.warn("reset loose fit to 1 at {0}".format(self.header_index))
-      print('\033[43mDistance is', distance, 'and loose fit is', self.loose_fit, '\033[0m')
-      pred_distance = torch.cdist(self.handled_data[row, :].view(1, -1), self.predication_data[row, :].view(1, -1))
+      print('\033[43mDistance is', distance, 'and loose fit is', self.loose_fit[col, 0], '\033[0m')
+      pred_distance = torch.cdist(self.handled_data[col, :].view(1, -1), self.predication_data[col, :].view(1, -1))
       print('\033[41mPred_distance is', pred_distance, '\033[0m')
       self.iter = 1 if self.iter == 1 and (torch.isnan(pred_distance) or pred_distance < 0.8) else 30
 
@@ -323,9 +329,9 @@ class DynamicAgent:
     :return:
     """
     # assertion
-    assert self.lost_start_idx[index] >= 0, "lost_start_idx is negative"
-    assert self.lost_end_idx[index] >= 0, "lost_end_idx is negative"
-    assert self.lost_end_idx[index] > self.lost_start_idx[index], "lost end index is not greater than lost start index"
+    assert self.lost_start_idx[index] >= 0, f"lost_start_idx is negative at {index}"
+    assert self.lost_end_idx[index] >= 0, f"lost_end_idx is negative at {index}"
+    assert self.lost_end_idx[index] > self.lost_start_idx[index], f"lost end index is not greater than lost start index at {index}"
     # rethink: is it necessary to consider the differential range? now we prefer not
     print('data at {0} should be interpolated.'.format(index))
     print('start at {0}, end at {1}'.format(self.lost_start_idx[index], self.lost_end_idx[index]))
@@ -343,17 +349,20 @@ class DynamicAgent:
     point_index_x = index * 3 + 1
 
     start_x, start_y, start_z = self.all_data[s_idx, point_index_x:point_index_x + 3]
-    final_x, final_y, final_z = self.all_data[s_idx, point_index_x:point_index_x + 3]
+    final_x, final_y, final_z = self.all_data[e_idx, point_index_x:point_index_x + 3]
     start_time, final_time = self.all_data[[s_idx, e_idx], 0]
-    quint_x = QuinticPolynomial(start_time, start_x, 0, 0, final_time, final_x, 0, 0, device=self.device)
-    quint_y = QuinticPolynomial(start_time, start_y, 0, 0, final_time, final_y, 0, 0, device=self.device)
-    quint_z = QuinticPolynomial(start_time, start_z, 0, 0, final_time, final_z, 0, 0, device=self.device)
+    print(f"interpolate start {start_time, start_x, start_y, start_z}")
+    quint_x = QuinticPolynomial(0, start_x, 0, 0, final_time - start_time, final_x, 0, 0, device=self.device)
+    quint_y = QuinticPolynomial(0, start_y, 0, 0, final_time - start_time, final_y, 0, 0, device=self.device)
+    quint_z = QuinticPolynomial(0, start_z, 0, 0, final_time - start_time, final_z, 0, 0, device=self.device)
+    print(f"interpolate final {final_time, final_x, final_y, final_z}")
 
     for idx in range(s_idx, e_idx):
-      t = self.all_data[idx, 0]
+      t = self.all_data[idx, 0] - start_time
       self.all_data[idx, point_index_x] = torch.tensor([quint_x.get_position(t)]).to(self.device)
       self.all_data[idx, point_index_x + 1] = torch.tensor([quint_y.get_position(t)]).to(self.device)
       self.all_data[idx, point_index_x + 2] = torch.tensor([quint_z.get_position(t)]).to(self.device)
+      print(f'interpolate at {t}:', self.all_data[idx, point_index_x:point_index_x + 3])
     print('backward interpolation finished!')
     self.retrain = True
 
