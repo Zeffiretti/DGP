@@ -26,7 +26,7 @@ class DynamicAgent:
   This class is to combine the results from 4 different Labelers.
   """
 
-  def __init__(self, all_data: type(torch.tensor([])), gaussian_window=120, save_mat=None, normalize=False, start_idx=23000):
+  def __init__(self, all_data: type(torch.tensor([])), gaussian_window=120, save_mat=None, normalize=False, start_idx=0):
     # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
     self.retrain = False
     self.tail_index = start_idx
@@ -36,7 +36,7 @@ class DynamicAgent:
     self.save_mat = save_mat
     self.loose_fit = 2 * torch.ones((14, 1))
     self.exp = 1.0 + 1e-3
-    self.iter = 1
+    self.iter = 10
     # self.all_data = torch.nan_to_num(all_data, nan=1000)
     self.all_data = all_data
     self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -74,18 +74,25 @@ class DynamicAgent:
     self.train_model()
     self.predict()
     print('round 1 finished!')
+    gap = 0
     # self.fig, self.ax = plt.subplots()
-    while self.tail_index < 30000:
+    while self.tail_index < 29878:
+      gap += 1
       self.update_data()
       if self.tail_index % 2000 == 0:
         self.iter = 150
         self.reset_model()
+        self.train_model(max_iter=self.iter)
+        gap = 0
       if self.retrain:
         self.train_model(max_iter=100)
+        gap = 0
         self.retrain = False
       else:
-        self.train_model(max_iter=self.iter)
-        self.iter = 1
+        if gap == 200:
+          self.train_model(max_iter=self.iter)
+          gap = 0
+          self.iter = 10
       self.predict()
       print('\033[44m\033[1;30mround \033[1;31m {0:6d} \033[1;30m finished at \033[1;31m {1:3.6f} \033[1;30ms! \033[0m' \
             .format(self.tail_index, self.test_time.item() / 30))
@@ -200,7 +207,7 @@ class DynamicAgent:
       print('after step 2,\n', self.permutation)
       # todo: before fit lost points, recovery points are to be checked
       for i, lost_start in enumerate(self.lost_start_idx):
-        if lost_start >= 0 and torch.sum(self.permutation[i, :]) == 1:
+        if lost_start >= 0 and torch.sum(self.permutation[:, i]) == 1:
           self.lost_end_idx[i] = self.header_index
           self.interpolation_idxes.append(i)
       self.fit_lost()
@@ -209,7 +216,7 @@ class DynamicAgent:
       # self.test_pos = self.handled_data.view(1, -1)
       # print('after,', self.test_pos)
     else:
-      self.iter = 1
+      self.iter = 10
     # print('handled data is', self.handled_data)
     assert not torch.isnan(torch.sum(self.handled_data)), 'handled_data contains nan number at {0}'.format(self.header_index)
     self.all_data[self.header_index, 1:] = self.handled_data.detach().view(1, -1)
@@ -321,7 +328,7 @@ class DynamicAgent:
       print('\033[43mDistance is', distance, 'and loose fit is', self.loose_fit[col, 0], '\033[0m')
       pred_distance = torch.cdist(self.handled_data[col, :].view(1, -1), self.predication_data[col, :].view(1, -1))
       print('\033[41mPred_distance is', pred_distance, '\033[0m')
-      self.iter = 1 if self.iter == 1 and (torch.isnan(pred_distance) or pred_distance < 0.8) else 30
+      self.iter = 10 if self.iter == 10 and (torch.isnan(pred_distance) or pred_distance < 0.8) else 30
 
   def backward_interpolation(self, index):
     """
